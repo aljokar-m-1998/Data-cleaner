@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>منظف بيانات احترافي — محلي (CSV/JSON/Excel)</title>
+  <meta name="description" content="منظف بيانات يعمل محليًا يدعم CSV/JSON/Excel مع معالجة على دفعات وتنزيل صالح للاستخدام.">
+  <link rel="manifest" href='data:application/json,{"name":"Data Cleaner","short_name":"Cleaner","start_url":".","display":"standalone","background_color":"#0f1220","theme_color":"#171a2b"}'>
+  <style>
+    :root { --bg:#0f1220; --panel:#171a2b; --muted:#9aa4b2; --fg:#e7ecf3; --acc:#4f8cff; --ok:#19c37d; --warn:#ffb020; --err:#ff5d5d; }
+    *{box-sizing:border-box}
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Cairo", Arial; background:var(--bg); color:var(--fg); }
+    header { padding:18px 20px; background:linear-gradient(90deg,#171a2b,#101427); border-bottom:1px solid #22263b; }
+    h1 { margin:0; font-size:20px; }
+    main { max-width:1200px; margin:18px auto; padding:0 14px; }
+    .grid { display:grid; gap:14px; grid-template-columns: 1fr; }
+    @media(min-width:980px){ .grid { grid-template-columns: 2fr 1fr; } }
+    .card { background:var(--panel); border:1px solid #22263b; border-radius:12px; padding:14px; }
+    .row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    input[type="file"]{ padding:10px; background:#0e1120; border:1px dashed #2a2f4a; border-radius:10px; color:var(--fg); width:100%; }
+    select, input[type="text"], input[type="number"]{ background:#0e1120; color:var(--fg); border:1px solid #2a2f4a; border-radius:8px; padding:8px; min-width:120px; }
+    button { background:var(--acc); color:white; border:0; border-radius:10px; padding:10px 14px; cursor:pointer; }
+    button[disabled]{ opacity:.5; cursor:not-allowed; }
+    .muted { color:var(--muted); font-size:12px; }
+    .progress { height:10px; background:#0e1120; border:1px solid #2a2f4a; border-radius:999px; overflow:hidden; }
+    .bar { height:100%; width:0%; background:linear-gradient(90deg, var(--ok), #58a6ff); transition:width .12s ease; }
+    .pill { font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid #2a2f4a; color:#c7d2e2; background:#0e1120; }
+    .kpis { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:8px; }
+    .kpi { background:#0e1120; border:1px solid #2a2f4a; border-radius:10px; padding:10px; }
+    .kpi b { display:block; font-size:12px; color:#9aa4b2; margin-bottom:4px; }
+    .kpi span { font-size:14px; }
+    pre.log { white-space:pre-wrap; max-height:240px; overflow:auto; background:#0e1120; border:1px solid #2a2f4a; border-radius:8px; padding:10px; }
+    details > summary { cursor:pointer; }
+    code.inline { background:#0e1120; border:1px solid #2a2f4a; border-radius:6px; padding:1px 5px; }
+    .hint { font-size:12px; color:#cbd5e1; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>منظف بيانات احترافي — محلي وسريع (CSV / JSON / Excel)</h1>
+    <div class="muted">رفع ➜ فحص ذكي ➜ تنظيف على دفعات ➜ تنزيل CSV/Excel صالح</div>
+  </header>
+
+  <main>
+    <div class="grid">
+      <section class="card">
+        <h2 style="margin:6px 0;">الملف والإعدادات</h2>
+        <div style="display:grid; gap:12px;">
+          <div>
+            <input id="file" type="file" accept=".csv,.json,.jsonl,.xlsx,.xls,text/csv,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" />
+            <div class="muted">CSV/JSON/JSONL/Excel — كل المعالجة محليًا على جهازك.</div>
+          </div>
+
+          <div class="row">
+            <span class="pill">الوضع:</span>
+            <select id="mode">
+              <option value="auto">تلقائي كامل</option>
+              <option value="custom">مخصص</option>
+            </select>
+            <span class="muted">اختر “مخصص” لضبط كل خطوة يدويًا</span>
+          </div>
+
+          <div id="customPanel" style="display:none; border-top:1px solid #22263b; padding-top:10px;">
+            <div class="row">
+              <label><input type="checkbox" id="opt_trim" checked /> تشذيب المسافات</label>
+              <label><input type="checkbox" id="opt_case" /> تنميط حالة النص (lowercase)</label>
+              <label><input type="checkbox" id="opt_dedupe" checked /> إزالة التكرارات</label>
+              <label><input type="checkbox" id="opt_dates" checked /> توحيد التواريخ (ISO)</label>
+              <label><input type="checkbox" id="opt_outliers" checked /> معالجة القيم الشاذة</label>
+            </div>
+            <div class="row">
+              <label>المفقود:
+                <select id="opt_missing">
+                  <option value="drop">حذف الصفوف التي تحتوي مفقود</option>
+                  <option value="fill-mean">ملء: رقمي=متوسط | نصي=النمط</option>
+                  <option value="fill-median">ملء: رقمي=وسيط | نصي=النمط</option>
+                  <option value="fill-constant">ملء ثابت</option>
+                </select>
+              </label>
+              <label>قيمة ثابتة:
+                <input type="text" id="opt_fillConst" placeholder="N/A" />
+              </label>
+              <label>عتبة z للشذوذ:
+                <input type="number" id="opt_z" value="3" step="0.1" min="1.5" style="width:90px;" />
+              </label>
+              <label>سياسة الشذوذ:
+                <select id="opt_outlierPolicy">
+                  <option value="winsorize">قص للأطراف (μ±zσ)</option>
+                  <option value="remove">حذف الصف</option>
+                  <option value="keep">إبقاء كما هو</option>
+                </select>
+              </label>
+            </div>
+            <div class="row">
+              <label>فاصل CSV عند التنزيل:
+                <select id="opt_csvSep">
+                  <option value=",">, (Comma)</option>
+                  <option value=";">; (Semicolon)</option>
+                  <option value="|">| (Pipe)</option>
+                </select>
+              </label>
+              <label>صيغة التنزيل:
+                <select id="opt_exportFmt">
+                  <option value="csv">CSV</option>
+                  <option value="xlsx">Excel</option>
+                </select>
+              </label>
+            </div>
+            <div class="hint">سيتم حفظ الإعدادات محليًا وتفعيلها تلقائيًا في الزيارات التالية.</div>
+          </div>
+
+          <div class="row">
+            <button id="btnAnalyze">فحص مبدئي</button>
+            <button id="btnClean" disabled>بدء التنظيف</button>
+            <button id="btnCancel" disabled>إلغاء</button>
+            <span id="status" class="muted"></span>
+          </div>
+
+          <div>
+            <div class="muted">التقدم — المرور 1 (استدلال/إحصاءات)</div>
+            <div class="progress"><div id="bar1" class="bar"></div></div>
+          </div>
+          <div>
+            <div class="muted">التقدم — المرور 2 (تنظيف/إخراج)</div>
+            <div class="progress"><div id="bar2" class="bar"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="card">
+        <h2 style="margin:6px 0;">ملخص الاستدلال</h2>
+        <div class="kpis">
+          <div class="kpi"><b>الصفوف</b><span id="k_rows">—</span></div>
+          <div class="kpi"><b>الأعمدة</b><span id="k_cols">—</span></div>
+          <div class="kpi"><b>أنواع الأعمدة</b><span id="k_types">—</span></div>
+          <div class="kpi"><b>نسبة المفقود</b><span id="k_missingRate">—</span></div>
+          <div class="kpi"><b>رقمية</b><span id="k_num">—</span></div>
+          <div class="kpi"><b>نصية</b><span id="k_str">—</span></div>
+          <div class="kpi"><b>تواريخ</b><span id="k_date">—</span></div>
+        </div>
+        <div style="margin-top:10px;">
+          <details>
+            <summary>تفاصيل الأعمدة</summary>
+            <pre id="schema" style="white-space:pre-wrap; max-height:280px; overflow:auto; background:#0e1120; border:1px solid #2a2f4a; border-radius:8px; padding:10px; direction:ltr;"></pre>
+          </details>
+        </div>
+        <div class="muted" style="margin-top:10px;">يمكن تعديل الإعدادات بعد الفحص ثم بدء التنظيف.</div>
+      </aside>
+    </div>
+
+    <section class="card" style="margin-top:14px;">
+      <h2 style="margin:6px 0;">سجل العمليات</h2>
+      <pre id="log" class="log"></pre>
+    </section>
+  </main>
+
+  <!-- مكتبات المتصفح -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.20.2/dist/xlsx.full.min.js"></script>
+
+  <script>
+  (function(){
+    const $ = id => document.getElementById(id);
+    const fileEl = $('file'), modeEl = $('mode'), customPanel = $('customPanel');
+    const btnAnalyze = $('btnAnalyze'), btnClean = $('btnClean'), btnCancel = $('btnCancel');
+    const statusEl = $('status'), bar1 = $('bar1'), bar2 = $('bar2'), logEl = $('log');
+    const k_rows = $('k_rows'), k_cols = $('k_cols'), k_types = $('k_types'), k_missingRate = $('k_missingRate');
+    const k_num = $('k_num'), k_str = $('k_str'), k_date = $('k_date'), schemaEl = $('schema');
+
+    const opts = {
+      trim: $('opt_trim'), lower: $('opt_case'), dedupe: $('opt_dedupe'),
+      dates: $('opt_dates'), outliers: $('opt_outliers'), missing: $('opt_missing'),
+      fillConst: $('opt_fillConst'), z: $('opt_z'), outlierPolicy: $('opt_outlierPolicy'),
+      exportFmt: $('opt_exportFmt'), csvSep: $('opt_csvSep')
+    };
+
+    // استعادة الإعدادات من التخزين المحلي
+    const saveSettings = () => {
+      const o = {
+        mode: modeEl.value,
+        trim: opts.trim.checked, lower: opts.lower.checked, dedupe: opts.dedupe.checked,
+        dates: opts.dates.checked, outliers: opts.outliers.checked,
+        missing: opts.missing.value, fillConst: opts.fillConst.value,
+        z: opts.z.value, outlierPolicy: opts.outlierPolicy.value,
+        exportFmt: opts.exportFmt.value, csvSep: opts.csvSep.value
+      };
+      localStorage.setItem('dc_settings', JSON.stringify(o));
+    };
+    const loadSettings = () => {
+      try{
+        const raw = localStorage.getItem('dc_settings');
+        if (!raw) return;
+        const o = JSON.parse(raw);
+        modeEl.value = o.mode || 'auto';
+        opts.trim.checked = !!o.trim;
+        opts.lower.checked = !!o.lower;
+        opts.dedupe.checked = !!o.dedupe;
+        opts.dates.checked = !!o.dates;
+        opts.outliers.checked = !!o.outliers;
+        opts.missing.value = o.missing || 'fill-mean';
+        opts.fillConst.value = o.fillConst || '';
+        opts.z.value = o.z || '3';
+        opts.outlierPolicy.value = o.outlierPolicy || 'winsorize';
+        opts.exportFmt.value = o.exportFmt || 'csv';
+        opts.csvSep.value = o.csvSep || ',';
+        customPanel.style.display = modeEl.value === 'custom' ? 'block' : 'none';
+      }catch{}
+    };
+    ['change','input'].forEach(ev=>{
+      document.addEventListener(ev, (e)=>{
+        if (['INPUT','SELECT'].includes((e.target || {}).tagName)) saveSettings();
+      }, true);
+    });
+    loadSettings();
+
+    const log = (msg, t='info')=>{
+      const tag = t==='warn'?'⚠️':t==='err'?'❌':'🟢';
+      logEl.textContent += `[${new Date().toLocaleTimeString()}] ${tag} ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    };
+    const fmtPct = x => isFinite(x) ? (x*100).toFixed(2)+'%' : '—';
+
+    let cancelFlag = false;
+    btnCancel.addEventListener('click', ()=>{ cancelFlag = true; log('تم طلب الإلغاء','warn'); });
+
+    // Helpers
+    const isMissing = v => v===null || v===undefined || (typeof v==='string' && v.trim()==='') || v==='NA' || v==='N/A' || v==='null';
+    const tryNum = v => {
+      if (typeof v === 'number') return v;
+      if (typeof v !== 'string') return NaN;
+      const s = v.trim().replace(/,/g,''); // إزالة فواصل الآلاف
+      const n = parseFloat(s);
+      return isFinite(n) ? n : NaN;
+    };
+    const maybeDate = v => {
+      if (v instanceof Date && !isNaN(v)) return v;
+      if (typeof v === 'number' && v > 1000000000 && v < 32503680000) { const d = new Date(v*1000); return isNaN(d)?null:d; }
+      if (typeof v === 'number' && v > 1000000000000 && v < 32503680000000) { const d = new Date(v); return isNaN(d)?null:d; }
+      if (typeof v === 'string') { const t = Date.parse(v); if (!isNaN(t)) return new Date(t); }
+      return null;
+    };
+
+    // حالة التحليل
+    let header = [];
+    let colTypes = []; // 'num' | 'date' | 'str'
+    let numericStats = {}; // col -> {count, mean, M2, __median}
+    let modeStats = {}; // col -> {freq Map, most, mostN}
+    let missingCount = 0;
+    let rowCount = 0;
+    let colCount = 0;
+
+    const hashRow = arr => {
+      let h = 0;
+      for (let i=0;i<arr.length;i++){
+        const s = String(arr[i] ?? '');
+        for (let j=0;j<s.length;j++) h = (h*31 + s.charCodeAt(j))|0;
+      }
+      return h>>>0;
+    };
+
+    function resetState(){
+      header = []; colTypes = []; numericStats = {}; modeStats = {};
+      missingCount = 0; rowCount = 0; colCount = 0;
+      bar1.style.width='0%'; bar2.style.width='0%'; cancelFlag=false;
+      statusEl.textContent = '';
+      logEl.textContent = '';
+      k_rows.textContent = '—'; k_cols.textContent='—'; k_types.textContent='—'; k_missingRate.textContent='—';
+      k_num.textContent='—'; k_str.textContent='—'; k_date.textContent='—'; schemaEl.textContent='';
+    }
+
+    function inferTypes(sampleRows){
+      const cols = header.length;
+      const counts = Array.from({length:cols}, ()=>({num:0,date:0,str:0}));
+      for (const r of sampleRows){
+        for (let c=0;c<cols;c++){
+          const v = r[c];
+          if (isMissing(v)) continue;
+          const d = maybeDate(v);
+          const n = tryNum(v);
+          if (!isNaN(n)) counts[c].num++;
+          else if (d) counts[c].date++;
+          else counts[c].str++;
+        }
+      }
+      colTypes = counts.map(cnt=>{
+        if (cnt.num >= cnt.date && cnt.num >= cnt.str) return 'num';
+        if (cnt.date >= cnt.num && cnt.date >= cnt.str) return 'date';
+        return 'str';
+      });
+    }
+
+    function welfordAdd(stats, x){
+      if (!stats) stats = {count:0, mean:0, M2:0};
+      stats.count++;
+      const delta = x - stats.mean;
+      stats.mean += delta / stats.count;
+      const delta2 = x - stats.mean;
+      stats.M2 += delta * delta2;
+      return stats;
+    }
+
+    function computeStd(stats){
+      if (!stats || stats.count < 2) return 0;
+      return Math.sqrt(stats.M2 / (stats.count - 1));
+    }
+
+    function updateSchemaUI(){
+      const numCols = colTypes.filter(t=>t==='num').length;
+      const strCols = colTypes.filter(t=>t==='str').length;
+      const dateCols = colTypes.filter(t=>t==='date').length;
+      k_rows.textContent = String(rowCount);
+      k_cols.textContent = String(colCount);
+      k_types.textContent = colTypes.join(', ');
+      k_missingRate.textContent = fmtPct(rowCount>0 ? missingCount/(rowCount*colCount) : 0);
+      k_num.textContent = String(numCols);
+      k_str.textContent = String(strCols);
+      k_date.textContent = String(dateCols);
+      const details = header.map((h,i)=>{
+        const st = numericStats[i] ? {mean:numericStats[i].mean, std: computeStd(numericStats[i])} : null;
+        return `${h} — ${colTypes[i]}${st?` (mean=${st.mean.toFixed(4)}, std=${st.std.toFixed(4)})`:''}`;
+      }).join('\n');
+      schemaEl.textContent = details || '';
+    }
+
+    // JSON/JSONL -> rows (للاستدلال السريع)
+    async function* jsonToRows(file){
+      const text = await file.text();
+      try{
+        const data = JSON.parse(text);
+        if (Array.isArray(data)){
+          const cols = new Set();
+          for (const o of data) Object.keys(o).forEach(k=>cols.add(k));
+          header = Array.from(cols);
+          for (const o of data) yield header.map(k=>o[k] ?? '');
+        }else{
+          const lines = text.split(/\r?\n/);
+          const objs = [];
+          for (const line of lines){
+            if (!line.trim()) continue;
+            try { objs.push(JSON.parse(line)); } catch {}
+          }
+          const cols = new Set();
+          objs.forEach(o=>Object.keys(o).forEach(k=>cols.add(k)));
+          header = Array.from(cols);
+          for (const o of objs) yield header.map(k=>o[k] ?? '');
+        }
+      } catch(e){
+        const lines = text.split(/\r?\n/);
+        const objs = [];
+        for (const line of lines){
+          if (!line.trim()) continue;
+          try { objs.push(JSON.parse(line)); } catch {}
+        }
+        const cols = new Set();
+        objs.forEach(o=>Object.keys(o).forEach(k=>cols.add(k)));
+        header = Array.from(cols);
+        for (const o of objs) yield header.map(k=>o[k] ?? '');
+      }
+    }
+
+    function applyCleaningCell(v, colIdx, cfg, stats){
+      const type = colTypes[colIdx];
+      if (isMissing(v)) return {val: null, missing:true, outlier:false};
+      let val = v;
+      if (typeof val === 'string' && cfg.trim) val = val.trim();
+      if (type === 'num'){
+        let n = tryNum(val);
+        if (!isNaN(n)){
+          if (cfg.outliers && stats){
+            const mean = stats.mean; const std = computeStd(stats);
+            const z = std>0 ? Math.abs((n - mean)/std) : 0;
+            if (z > cfg.z){
+              if (cfg.outlierPolicy === 'remove') return {val:null, missing:true, outlier:true};
+              if (cfg.outlierPolicy === 'winsorize'){
+                const cap = cfg.z * std;
+                n = Math.max(mean - cap, Math.min(mean + cap, n));
+              }
+            }
+          }
+          val = n;
+        }
+      } else if (type === 'date' && cfg.dates){
+        const d = maybeDate(val);
+        if (d) val = d.toISOString().slice(0,10);
+      } else {
+        if (cfg.lower && typeof val === 'string') val = val.toLowerCase();
+      }
+      return {val, missing:false, outlier:false};
+    }
+
+    function computeFillValue(colIdx, method){
+      if (method === 'fill-constant') return opts.fillConst.value || 'N/A';
+      if (colTypes[colIdx] === 'num'){
+        const st = numericStats[colIdx];
+        if (!st) return 0;
+        if (method === 'fill-mean') return st.mean;
+        if (method === 'fill-median') return st.__median ?? st.mean;
+      } else {
+        const m = modeStats[colIdx];
+        return m?.most ?? '';
+      }
+      return '';
+    }
+
+    // فحص CSV (تمرير أول)
+    function analyzeCSV(file){
+      return new Promise((resolve, reject)=>{
+        resetState();
+        log('بدء الفحص المبدئي لملف CSV...');
+        let sampleRows = [], first = true, totalRows = 0, totalMissing = 0;
+        Papa.parse(file, {
+          worker: true, header: false, skipEmptyLines: false, chunkSize: 1024*1024,
+          step: (results, parser) => {
+            if (cancelFlag){ parser.abort(); return; }
+            const row = results.data;
+            if (first){
+              header = row.map(v => String(v ?? '').trim());
+              colCount = header.length;
+              for (let i=0;i<header.length;i++){
+                numericStats[i] = undefined;
+                modeStats[i] = {freq:new Map(), most:'', mostN:0};
+              }
+              first = false;
+              return;
+            }
+            if (!row || (row.length===1 && row[0]===null)) return;
+            const cells = row.length < colCount ? row.concat(Array(colCount - row.length).fill('')) : row.slice(0,colCount);
+            if (sampleRows.length < 1000) sampleRows.push(cells);
+
+            let rowMissing = 0;
+            for (let c=0;c<colCount;c++){
+              const v = cells[c];
+              if (isMissing(v)) rowMissing++;
+            }
+            totalMissing += rowMissing;
+            totalRows++;
+
+            for (let c=0;c<colCount;c++){
+              const v = cells[c];
+              if (isMissing(v)) continue;
+              const num = tryNum(v);
+              if (!isNaN(num)){
+                numericStats[c] = welfordAdd(numericStats[c], num);
+              } else {
+                const s = String(v);
+                const m = modeStats[c];
+                const prev = (m.freq.get(s) || 0) + 1;
+                m.freq.set(s, prev);
+                if (prev > m.mostN){ m.mostN = prev; m.most = s; }
+              }
+            }
+
+            if (totalRows % 1000 === 0){
+              const progress = Math.min(95, Math.round((results.meta.cursor / file.size)*100));
+              bar1.style.width = progress + '%';
+              statusEl.textContent = `فحص: ${progress}%`;
+            }
+          },
+          complete: () => {
+            rowCount = totalRows;
+            inferTypes(sampleRows);
+            for (let c=0;c<colCount;c++){
+              if (colTypes[c]==='num' && numericStats[c] && !('__median' in numericStats[c])){
+                const arr = sampleRows.map(r=>tryNum(r[c])).filter(x=>!isNaN(x)).sort((a,b)=>a-b);
+                const med = arr.length? (arr[Math.floor(arr.length/2)]): numericStats[c].mean;
+                numericStats[c].__median = med;
+              }
+            }
+            missingCount = totalMissing;
+            bar1.style.width='100%';
+            updateSchemaUI();
+            log('انتهى الفحص المبدئي.');
+            resolve();
+          },
+          error: (err) => reject(err)
+        });
+      });
+    }
+
+    // تنظيف CSV (تمرير ثاني) + إخراج صالح
+    function cleanCSV(file, cfg){
+      return new Promise((resolve, reject)=>{
+        log('بدء التنظيف (CSV)...');
+        btnCancel.disabled = false;
+        const lines = [];
+        const seen = new Set();
+        let processed = 0, kept = 0, dropped = 0;
+        const SEP = cfg.csvSep || ',';
+
+        // العنوان
+        lines.push(header.join(SEP)+'\n');
+
+        Papa.parse(file, {
+          worker: true, header: false, skipEmptyLines: false, chunkSize: 1024*1024,
+          step: (results, parser)=>{
+            if (cancelFlag){ parser.abort(); return; }
+            const row = results.data;
+            if (!row || (row.length===1 && row[0]===null)) return;
+
+            // تخطي صف العنوان إن تكرر
+            if (processed===0){
+              const firstData = row.map(v=>String(v??'').trim());
+              const isHeaderLike = firstData.join('|') === header.join('|');
+              if (isHeaderLike){ processed++; return; }
+            }
+
+            const arr = row.length < colCount ? row.concat(Array(colCount - row.length).fill('')) : row.slice(0,colCount);
+
+            let dropRow = false;
+            const out = new Array(colCount);
+            for (let c=0;c<colCount;c++){
+              const {val, missing} = applyCleaningCell(arr[c], c, cfg, numericStats[c]);
+              if (missing){
+                if (cfg.missing === 'drop') { dropRow = true; break; }
+                else if (cfg.missing === 'fill-constant') out[c] = cfg.fillConst || 'N/A';
+                else if (cfg.missing === 'fill-mean' || cfg.missing === 'fill-median'){
+                  out[c] = computeFillValue(c, cfg.missing);
+                } else out[c] = '';
+              } else {
+                out[c] = val;
+              }
+            }
+            if (dropRow){ dropped++; processed++; return; }
+
+            if (cfg.dedupe){
+              const h = hashRow(out);
+              if (seen.has(h)){ dropped++; processed++; return; }
+              seen.add(h);
+            }
+
+            const line = out.map(v=>{
+              if (v===null || v===undefined) return '';
+              const s = String(v);
+              const needsQuote = s.includes('"') || s.includes('\n') || s.includes('\r') || s.includes(SEP);
+              if (needsQuote) return `"${s.replace(/"/g,'""')}"`;
+              return s;
+            }).join(SEP);
+            lines.push(line+'\n');
+            kept++; processed++;
+
+            if (processed % 1000 === 0){
+              const prog = Math.min(100, Math.round((processed/Math.max(1,rowCount))*100));
+              bar2.style.width = prog + '%';
+              statusEl.textContent = `تنظيف: ${prog}%`;
+            }
+          },
+          complete: ()=>{
+            bar2.style.width = '100%';
+            log(`تم التنظيف. حفظ ${kept} صفًا. حذف/تجاهل ${dropped} صفًا.`);
+            const csvContent = '\uFEFF' + lines.join(''); // BOM + المحتوى
+            const blob = new Blob([csvContent], {type:'text/csv;charset=utf-8'});
+            resolve({blob, rows: kept});
+          },
+          error: (err)=> reject(err)
+        });
+      });
+    }
+
+    // Excel -> CSV (للتحليل والتنظيف بنفس خط أنابيب CSV)
+    async function excelToCSVFileLike(file, sep=','){
+      log('تحويل Excel إلى CSV داخليًا...');
+      const ab = await file.arrayBuffer();
+      const wb = XLSX.read(ab, {type:'array'});
+      const sheetName = wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const csv = XLSX.utils.sheet_to_csv(ws, {FS:sep, RS:'\n'});
+      return new File([csv], (file.name||'sheet')+'.csv', {type:'text/csv'});
+    }
+
+    // فحص JSON/JSONL (عينة للاستدلال)
+    async function analyzeJSON(file){
+      resetState();
+      log('بدء الفحص المبدئي لملف JSON/JSONL...');
+      let i = 0;
+      const rows = [];
+      for await (const row of jsonToRows(file)){
+        if (i===0){
+          header = header.length? header : row.map((_,idx)=>`col_${idx+1}`);
+          colCount = header.length;
+          for (let c=0;c<colCount;c++){ numericStats[c]=undefined; modeStats[c]={freq:new Map(), most:'', mostN:0}; }
+        }
+        rows.push(row);
+        for (let c=0;c<colCount;c++){
+          const v = row[c];
+          if (isMissing(v)) { missingCount++; continue; }
+          const n = tryNum(v);
+          if (!isNaN(n)) numericStats[c] = welfordAdd(numericStats[c], n);
+          else {
+            const s = String(v);
+            const m = modeStats[c];
+            const prev = (m.freq.get(s)||0)+1;
+            m.freq.set(s, prev);
+            if (prev > m.mostN){ m.mostN = prev; m.most = s; }
+          }
+        }
+        i++;
+        if (i>=1000) break; // عينة
+        const prog = Math.min(95, Math.round((i/1000)*100));
+        bar1.style.width = prog + '%'; statusEl.textContent = `فحص: ${prog}%`;
+      }
+      inferTypes(rows);
+      for (let c=0;c<colCount;c++){
+        if (colTypes[c]==='num' && numericStats[c] && !('__median' in numericStats[c])){
+          const arr = rows.map(r=>tryNum(r[c])).filter(x=>!isNaN(x)).sort((a,b)=>a-b);
+          const med = arr.length? (arr[Math.floor(arr.length/2)]): numericStats[c].mean;
+          numericStats[c].__median = med;
+        }
+      }
+      rowCount = rows.length;
+      bar1.style.width='100%';
+      updateSchemaUI();
+      log('انتهى الفحص المبدئي لملف JSON.');
+    }
+
+    // تنظيف JSON/JSONL وإخراج CSV صالح
+    async function cleanJSON(file, cfg){
+      log('بدء التنظيف (JSON/JSONL)...');
+      const lines = [];
+      const seen = new Set();
+      let kept=0, dropped=0, processed=0;
+      const SEP = cfg.csvSep || ',';
+
+      const text = await file.text();
+      let objs;
+      try{
+        const data = JSON.parse(text);
+        if (Array.isArray(data)) objs = data;
+        else throw new Error('JSON ليس مصفوفة');
+      }catch{
+        objs = [];
+        for (const line of text.split(/\r?\n/)){
+          if (!line.trim()) continue;
+          try { objs.push(JSON.parse(line)); } catch {}
+        }
+      }
+
+      const colsSet = new Set();
+      objs.forEach(o=>Object.keys(o).forEach(k=>colsSet.add(k)));
+      header = Array.from(colsSet);
+      colCount = header.length;
+      lines.push(header.join(SEP)+'\n');
+
+      for (const o of objs){
+        if (cancelFlag) break;
+        const row = header.map(k=>o[k] ?? '');
+        let dropRow = false;
+        const out = new Array(colCount);
+        for (let c=0;c<colCount;c++){
+          const {val, missing} = applyCleaningCell(row[c], c, cfg, numericStats[c]);
+          if (missing){
+            if (cfg.missing === 'drop'){ dropRow = true; break; }
+            else if (cfg.missing === 'fill-constant') out[c] = cfg.fillConst || 'N/A';
+            else if (cfg.missing === 'fill-mean' || cfg.missing === 'fill-median'){
+              out[c] = computeFillValue(c, cfg.missing);
+            } else out[c] = '';
+          } else out[c] = val;
+        }
+        if (dropRow){ dropped++; processed++; continue; }
+        if (cfg.dedupe){
+          const h = hashRow(out);
+          if (seen.has(h)){ dropped++; processed++; continue; }
+          seen.add(h);
+        }
+        const line = out.map(v=>{
+          if (v===null || v===undefined) return '';
+          const s = String(v);
+          const needsQuote = s.includes('"') || s.includes('\n') || s.includes('\r') || s.includes(SEP);
+          if (needsQuote) return `"${s.replace(/"/g,'""')}"`;
+          return s;
+        }).join(SEP);
+        lines.push(line+'\n');
+        kept++; processed++;
+
+        if (processed % 500 === 0){
+          const prog = Math.min(100, Math.round((processed/Math.max(kept+ dropped,1))*100));
+          bar2.style.width = prog + '%'; statusEl.textContent = `تنظيف: ${prog}%`;
+        }
+      }
+      bar2.style.width='100%';
+      log(`تم التنظيف. حفظ ${kept} صفًا. حذف/تجاهل ${dropped} صفًا.`);
+      const csvContent = '\uFEFF' + lines.join('');
+      return {blob: new Blob([csvContent], {type:'text/csv;charset=utf-8'}), rows: kept};
+    }
+
+    async function handleAnalyze(){
+      const file = fileEl.files?.[0];
+      if (!file){ alert('اختر ملفًا أولًا'); return; }
+      btnAnalyze.disabled = true; btnClean.disabled = true; btnCancel.disabled = false;
+      try{
+        const name = (file.name||'').toLowerCase();
+        if (name.endsWith('.csv') || file.type==='text/csv'){
+          await analyzeCSV(file);
+          fileEl._convertedCSV = null;
+        } else if (name.endsWith('.xlsx') || name.endsWith('.xls')){
+          const sep = (modeEl.value==='auto') ? ',' : (opts.csvSep.value || ',');
+          const csvFile = await excelToCSVFileLike(file, sep);
+          await analyzeCSV(csvFile);
+          fileEl._convertedCSV = csvFile;
+        } else if (name.endsWith('.json') || name.endsWith('.jsonl') || file.type==='application/json'){
+          await analyzeJSON(file);
+          fileEl._convertedCSV = null;
+        } else {
+          log('صيغة غير معروفة. محاولة قراءته كـ CSV.','warn');
+          await analyzeCSV(file);
+          fileEl._convertedCSV = null;
+        }
+        btnClean.disabled = false;
+      } catch(e){
+        console.error(e);
+        log('فشل الفحص: '+ e.message, 'err');
+      } finally{
+        btnAnalyze.disabled = false; btnCancel.disabled = true;
+        statusEl.textContent = '';
+      }
+    }
+
+    async function handleClean(){
+      const file0 = fileEl.files?.[0];
+      if (!file0){ alert('اختر ملفًا أولًا'); return; }
+      const cfg = {
+        trim: modeEl.value==='auto' ? true : opts.trim.checked,
+        lower: modeEl.value==='auto' ? false : opts.lower.checked,
+        dedupe: modeEl.value==='auto' ? true : opts.dedupe.checked,
+        dates: modeEl.value==='auto' ? true : opts.dates.checked,
+        outliers: modeEl.value==='auto' ? true : opts.outliers.checked,
+        missing: modeEl.value==='auto' ? 'fill-mean' : opts.missing.value,
+        fillConst: (opts.fillConst.value || 'N/A'),
+        z: parseFloat(opts.z.value || '3'),
+        outlierPolicy: modeEl.value==='auto' ? 'winsorize' : opts.outlierPolicy.value,
+        exportFmt: modeEl.value==='auto' ? 'csv' : opts.exportFmt.value,
+        csvSep: modeEl.value==='auto' ? ',' : (opts.csvSep.value || ',')
+      };
+
+      btnClean.disabled = true; btnCancel.disabled = false; cancelFlag=false;
+      bar2.style.width='0%'; statusEl.textContent='جارِ التنظيف...';
+
+      try{
+        const name = (file0.name||'').toLowerCase();
+        let srcFile = (fileEl._convertedCSV) ? fileEl._convertedCSV : file0;
+        let result;
+        if (name.endsWith('.csv') || srcFile === fileEl._convertedCSV || file0.type==='text/csv'){
+          result = await cleanCSV(srcFile, cfg);
+        } else if (name.endsWith('.xlsx') || name.endsWith('.xls')){
+          const csvFile = fileEl._convertedCSV || await excelToCSVFileLike(file0, cfg.csvSep);
+          result = await cleanCSV(csvFile, cfg);
+        } else if (name.endsWith('.json') || name.endsWith('.jsonl') || file0.type==='application/json'){
+          result = await cleanJSON(file0, cfg);
+        } else {
+          result = await cleanCSV(srcFile, cfg);
+        }
+
+        // تصدير
+        let outNameBase = (file0.name||'cleaned').replace(/\.(csv|xlsx|xls|json|jsonl)$/i,'') + '_cleaned';
+        if (cfg.exportFmt === 'csv'){
+          const url = URL.createObjectURL(result.blob);
+          download(url, outNameBase + '.csv');
+          URL.revokeObjectURL(url);
+        } else {
+          // تحويل CSV الناتج إلى Excel نظيف
+          const text = await result.blob.text();
+          const rows = text.split('\n').map(line=>{
+            if (!line.trim()) return null;
+            const out = []; let cur=''; let inQ=false;
+            for (let i=0;i<line.length;i++){
+              const ch = line[i];
+              if (inQ){
+                if (ch === '"' && line[i+1] === '"'){ cur+='"'; i++; }
+                else if (ch === '"'){ inQ=false; }
+                else cur += ch;
+              } else {
+                if (ch === '"') inQ = true;
+                else if (ch === cfg.csvSep){ out.push(cur); cur=''; }
+                else cur += ch;
+              }
+            }
+            out.push(cur);
+            return out.map(v => v ?? '');
+          }).filter(Boolean);
+          const ws = XLSX.utils.aoa_to_sheet(rows);
+          const wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, 'Cleaned');
+          const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+          const blobX = new Blob([wbout], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+          const url = URL.createObjectURL(blobX);
+          download(url, outNameBase + '.xlsx');
+          URL.revokeObjectURL(url);
+        }
+
+        log('تم إنشاء الملف النظيف وتنزيله.');
+      } catch(e){
+        console.error(e);
+        log('فشل التنظيف: '+ e.message, 'err');
+      } finally {
+        btnCancel.disabled = true;
+        statusEl.textContent = '';
+      }
+    }
+
+    function download(url, name){
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    // أحداث الأزرار
+    modeEl.addEventListener('change', ()=> {
+      customPanel.style.display = modeEl.value === 'custom' ? 'block' : 'none';
+      saveSettings();
+    });
+    document.getElementById('btnAnalyze').addEventListener('click', handleAnalyze);
+    document.getElementById('btnClean').addEventListener('click', handleClean);
+
+    // Service worker بسيط للأوفلاين
+    if ('serviceWorker' in navigator){
+      const swCode = `
+        self.addEventListener('install', e=>{
+          e.waitUntil(caches.open('cleaner-v1').then(c=>c.addAll(['./'])));
+          self.skipWaiting();
+        });
+        self.addEventListener('activate', e=> self.clients.claim());
+        self.addEventListener('fetch', e=>{
+          e.respondWith(
+            caches.match(e.request).then(res=> res || fetch(e.request).catch(()=>caches.match('./')))
+          );
+        });
+      `;
+      const blob = new Blob([swCode], {type:'text/javascript'});
+      const url = URL.createObjectURL(blob);
+      navigator.serviceWorker.register(url).catch(()=>{});
+    }
+  })();
+  </script>
+</body>
+</html>
